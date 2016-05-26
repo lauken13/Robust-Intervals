@@ -155,7 +155,7 @@ CN.mean <- function(x,nsamp=1000,thin=5,burnin=1000) {
   sig <- 1/sqrt(tau) # standard deviation
   mu ~ dnorm(0,.0001) # prior over mean
   htmp ~ dexp(.1) # the scale: contaminants expected to have 10x width
-  h <- htmp + .01 # SIGH 
+  h <- htmp + .01 # Needs to be non-zero
   p ~ dbeta(1,9) # contaminant probability: 10% contaminant
   for( i in 1:N) {
   z[i] ~ dbern(p) # is contaminant?
