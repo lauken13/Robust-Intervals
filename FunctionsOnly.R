@@ -1,48 +1,25 @@
-#########################################################################
-#                           FUNCTIONS
-#########################################################################
-#This script contains the functions used in the paper: Not every interval is credible
-# Authored by Lauren Kennedy, Daniel Navarro, Amy Perfors and Nancy Briggs
-#Last update 26/04/206
-
-##########################################################################
-#                          LOAD THE PACKAGES
-##########################################################################
-
-
 library(LaplacesDemon,quietly=TRUE,warn.conflicts = FALSE,verbose=FALSE)
 library(rjags,quietly=TRUE,warn.conflicts = FALSE,verbose=FALSE)
+library(ggplot2,quietly=TRUE,warn.conflicts = FALSE,verbose=FALSE)
 library(sn,quietly=TRUE,warn.conflicts = FALSE,verbose=FALSE)
 library(weights,quietly=TRUE,warn.conflicts = FALSE,verbose=FALSE)
-
-
+library(dplyr)
+library(HDInterval)
 ###################################################################################
 #                           FUNCTIONS
 ###################################################################################
 
 
 createData<-function(sample.size,gval,hval,contProp,contSpread=NA,error){
-  #Creates the data used for simulation. 
-  #Takes in sample size (ensure that whatever contaminant proportion produces whole numbers, 
-  #otherwise will round
-  #gval and hval control skew and kurtosis of our standard normal
-  #contProp is the proportion (less than 1) of contamination
-  #contaminate Spread is degree of spread in the unbiased contaminate, held constant at 10
-  #for our simulations
-  #error is the type of error. Two options. "normal" or "normal.bias"
   if(error=='normal'){
     x<-c(ghdist(sample.size*(1-contProp),gval,hval),rnorm(sample.size*contProp,0,contSpread))
   }else if(error=='normal.bias'){
     x<-c(ghdist(sample.size*(1-contProp),gval,hval),rnorm(sample.size*contProp,10,1))
   }
-  return(x)
+    return(x)
 }
 
-
-
-###### Convenience function################
-#Taken from the WRS package from "Introduction to Robust Estimation and 
-#Hypothesis Testing, Wilcox(2013)
+#### model 1 ####
 
 ghdist<-function (n, g = 0, h = 0) 
 {
@@ -55,15 +32,6 @@ ghdist<-function (n, g = 0, h = 0)
   ghdist
 }
 
-#The remaining four functions are the four functions for estimating a posterior for the mean (or trimmed mean)
-#for each of the four methods discussed in the paper
-#BBmean-Bayesian Bootstrapped mean
-#BBtrim-Bayesian Bootstrapped trimmed mean
-#normal model - normal model (no conataminant assumption)
-#CN.mean -contaminated normal model 
-
-#### model 1 #######
-
 BBmean <- function(x,nsamp=1000) {
   samples <- BayesianBootstrap(x,n=nsamp,Method=weighted.mean)
   samples <- unlist(samples)
@@ -74,6 +42,7 @@ BBmean <- function(x,nsamp=1000) {
 #### model 2 ####
 
 BBtrim <- function(x,nsamp=1000) {
+  
   weighted.trimmed.mean <- function(x,w,trimmed=.2){
     ord <- order(x)
     x <- x[ord]
@@ -187,14 +156,55 @@ CN.mean <- function(x,nsamp=1000,thin=5,burnin=1000) {
   
   mu <- as.matrix( samples[[1]])
   samples.mu <- mu[,1] + mean(x)
-  samples.cont<-samples[[2]]
+  #samples.cont<-samples[[2]]
   
   estimates<-apply(samples[[2]],1,mean)
   no.cont<-length(estimates[estimates>.5])
   
-  pop.mean<-mean(samples.mu)
-  ci.low <- quantile(samples.mu,probs=.025)
-  ci.high <- quantile(samples.mu,probs=.975)
-  Out<- list(population.mean=pop.mean, credible.interval=c(ci.low,ci.high),number.contaminants=no.cont)
+  #pop.mean<-mean(samples.mu)
+  #ci.low <- quantile(samples.mu,probs=.025)
+  #ci.high <- quantile(samples.mu,probs=.975)
+  Out<- list(posterior=samples.mu, number.contaminants=no.cont)
   return(Out)
   }
+
+#### model 5 ####
+
+tModel <- function(x,nsamp=1000,thin=5,burnin=1000) {
+  
+  jagsModelString <- 
+    "model {
+  tau ~ dgamma(.0001,.0001) # prior over the precision
+  mu ~ dnorm(0,.0001) # prior over mean
+  df ~ dexp(1) #prior over the degrees of freedom
+  k<-df+.001
+  for( i in 1:N) {
+  X[i]~dt(mu,tau,k) 
+  }
+}"
+  
+  jagsData <- list(
+    X = x-mean(x),
+    N = length(x)
+  )
+  
+  jagsModel <- jags.model(
+    file = textConnection(jagsModelString), 
+    data = jagsData, 
+    n.adapt = burnin,
+    quiet=TRUE 
+  )
+  
+  samples <- jags.samples(
+    model = jagsModel, 
+    variable.names = "mu", 
+    n.iter = nsamp*thin,
+    thin = thin,
+    progress.bar="none"
+  )
+  
+  mu <- as.matrix( samples[[1]] )
+  samples <- mu[,1] + mean(x)
+  return(samples)
+  }
+
